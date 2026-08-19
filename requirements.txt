@@ -1,0 +1,3 @@
+# LLM Agent Harness 依赖
+openai>=1.30.0
+tiktoken>=0.7.0
