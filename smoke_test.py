@@ -1,20 +1,28 @@
 """离线冒烟测试:不调用任何 LLM API,验证 harness 各核心模块可用。
 
-运行: python -m harness.smoke_test
+支持的三种启动方式(详见 harness/__init__.py 顶部说明):
+    1) cd "d:/study/LLM API" && python -m harness.smoke_test
+    2) cd "d:/study/LLM API" && python harness/smoke_test.py
+    3) cd harness             && python smoke_test.py     ← harness 当根目录
 """
 import json
 import sys
 import pathlib
 
+# ---------------------------------------------------------------------------
+# 兼容 shim:让本文件能在三种启动方式下都被解析(同 main.py)。
+# ---------------------------------------------------------------------------
 if __package__ in (None, ""):
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+    __package__ = "harness"
 
-from harness.config import settings
-from harness.core.registry import registry
-from harness.core.security import ToolSecurityError, check_command_safety
-from harness.core.messages import trim_messages, count_tokens
-from harness.core.memory import MemoryStore
-from harness.tools import load_all
+# 包内相对导入,与启动方式无关
+from .config import settings
+from .core.registry import registry
+from .core.security import ToolSecurityError, check_command_safety
+from .core.messages import trim_messages, count_tokens
+from .core.memory import MemoryStore
+from .tools import load_all
 
 FAIL = []
 

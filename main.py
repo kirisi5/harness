@@ -1,9 +1,9 @@
 """CLI 入口:交互式 REPL。
 
-运行方式(在 harness 上级目录,即 d:/study/LLM API):
-    python -m harness.main
-或:
-    python harness/main.py
+支持的三种启动方式(详见 harness/__init__.py 顶部说明):
+    1) cd "d:/study/LLM API" && python -m harness.main
+    2) cd "d:/study/LLM API" && python harness/main.py
+    3) cd harness             && python main.py     ← harness 当项目根目录
 
 命令:
     /help              查看帮助
@@ -18,17 +18,28 @@ import pathlib
 import sys
 from logging.handlers import RotatingFileHandler
 
-# 支持直接 `python harness/main.py` 运行
+# ---------------------------------------------------------------------------
+# 兼容 shim:让本文件能在三种启动方式下都被解析。
+#
+# - `python -m harness.main`:__package__ 已被识别为 "harness",以下跳过。
+# - `python harness/main.py` 或 `cd harness && python main.py`:__package__ 为空,
+#   需要把 harness 的父目录加进 sys.path,这样 `from harness.xxx` 才能找到包;
+#   同时把当前模块的 __package__ 显式设为 "harness",让下面的包内相对导入
+#   (from .config import ...) 也能解析。
+# ---------------------------------------------------------------------------
 if __package__ in (None, ""):
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+    __package__ = "harness"
 
-from harness.config import settings
-from harness.core.agent import Agent
-from harness.core.hooks import make_default_hooks
-from harness.core.memory import MemoryStore
-from harness.core.registry import registry
-from harness.core.skills import load_skills_for
-from harness.tools import load_all
+# 注意:用包内相对导入(. 开头),与启动方式无关,
+# 只要当前 __package__ 能解析为 "harness" 即可。
+from .config import settings
+from .core.agent import Agent
+from .core.hooks import make_default_hooks
+from .core.memory import MemoryStore
+from .core.registry import registry
+from .core.skills import load_skills_for
+from .tools import load_all
 
 logger = logging.getLogger("harness")
 
