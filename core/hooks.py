@@ -7,6 +7,8 @@ import logging
 import time
 from typing import Callable, List, Optional
 
+from .redaction import redact
+
 logger = logging.getLogger("harness.hooks")
 
 
@@ -82,6 +84,7 @@ def make_default_hooks(settings) -> HookManager:
     @hooks.on_post_tool
     def _truncate(name: str, args: dict, output: str) -> str:
         cap = getattr(settings, "TOOL_OUTPUT_MAX_CHARS", 5000)
+        output = redact(output)
         if len(output) > cap:
             return output[:cap] + f"\n...(truncated by hook, total {len(output)} chars)..."
         return output
@@ -90,14 +93,15 @@ def make_default_hooks(settings) -> HookManager:
     if audit:
         @hooks.on_pre_llm
         def _audit_in(messages, **ctx) -> None:
-            logger.info("[LLM->] iteration=%s messages=%s chars=%s",
-                        ctx.get("iteration"), len(messages),
-                        sum(len(str(m.get("content", ""))) for m in messages))
+            logger.info("[LLM->] request_id=%s iteration=%s messages=%s chars=%s",
+                        ctx.get("request_id"), ctx.get("iteration"), len(messages),
+                        sum(len(redact(m.get("content", ""))) for m in messages))
 
         @hooks.on_post_llm
         def _audit_out(msg_dict, **ctx) -> None:
-            logger.info("[<-LLM] finish=%s tool_calls=%s content_chars=%s",
-                        ctx.get("finish_reason"), len(msg_dict.get("tool_calls") or []),
-                        len(msg_dict.get("content") or ""))
+            logger.info("[<-LLM] request_id=%s finish=%s tool_calls=%s content_chars=%s",
+                        ctx.get("request_id"), ctx.get("finish_reason"),
+                        len(msg_dict.get("tool_calls") or []),
+                        len(redact(msg_dict.get("content") or "")))
 
     return hooks

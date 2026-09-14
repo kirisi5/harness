@@ -56,13 +56,22 @@ class AgentStats:
 
 class Agent:
     def __init__(self, registry: ToolRegistry, hooks: HookManager, settings: Optional[Settings] = None,
-                 client: Optional[OpenAI] = None, skill_loader=None) -> None:
+                 client: Optional[OpenAI] = None, skill_loader=None, on_text=None,
+                 on_tool=None) -> None:
         self.settings = settings or default_settings
         self.registry = registry
         self.hooks = hooks or HookManager()
-        self.client = client or OpenAI(api_key=self.settings.API_KEY, base_url=self.settings.BASE_URL)
+        self.client = client or OpenAI(
+            api_key=self.settings.API_KEY,
+            base_url=self.settings.BASE_URL,
+            timeout=self.settings.LLM_TIMEOUT,
+        )
         self.skill_loader = skill_loader or (lambda user_query: "")
+        self.on_text = on_text
+        self.on_tool = on_tool
+        self.request_id: Optional[str] = None
         self.stats = AgentStats()
+        self._run_started = 0.0
 
     # ---------- system 组装 ----------
     def build_system(self, messages: List[dict]) -> str:
@@ -138,7 +147,8 @@ class Agent:
                 continue
             if delta.content:
                 text_parts.append(delta.content)
-                print(delta.content, end="", flush=True)
+                if self.on_text is not None:
+                    self.on_text(delta.content)
             for tc in delta.tool_calls or []:
                 slot = tool_calls.setdefault(tc.index, {"id": None, "function": {"name": None, "arguments": ""}})
                 if tc.id:
@@ -148,8 +158,6 @@ class Agent:
                         slot["function"]["name"] = tc.function.name
                     if tc.function.arguments:
                         slot["function"]["arguments"] += tc.function.arguments
-        print(flush=True)
-
         msg_dict = {"role": "assistant", "content": "".join(text_parts) or None}
         if tool_calls:
             msg_dict["tool_calls"] = [
@@ -165,17 +173,33 @@ class Agent:
         """在给定消息列表上运行 agent,直至模型停止调用工具。会就地修改 messages。"""
         max_iter = max_iterations or self.settings.MAX_ITERATIONS
         final_text = ""
+        run_started = time.monotonic()
+        self._run_started = run_started
         for iteration in range(1, max_iter + 1):
             self.stats.iterations = iteration
+            if self.settings.MAX_RUN_SECONDS > 0 and (time.monotonic() - run_started) >= self.settings.MAX_RUN_SECONDS:
+                logger.warning("达到单次运行时间上限 %.1fs", self.settings.MAX_RUN_SECONDS)
+                return final_text or "任务因达到运行时间上限而停止。"
+            if self.settings.MAX_TOTAL_TOKENS > 0 and self.stats.total_tokens >= self.settings.MAX_TOTAL_TOKENS:
+                logger.warning("达到单次运行 token 上限 %s", self.settings.MAX_TOTAL_TOKENS)
+                return final_text or "任务因达到 token 预算上限而停止。"
             # 裁剪上下文(只在轮次边界切,不拆散工具三件套)
             messages[:] = trim_messages(messages, self.settings.CONTEXT_BUDGET_TOKENS, self.settings.MODEL)
 
             system = self.build_system(messages)
             state = {"start": time.time()}
-            self.hooks.run_pre_llm(messages, iteration=iteration, state=state)
+            hooked_messages = self.hooks.run_pre_llm(
+                messages, iteration=iteration, state=state,
+                request_id=getattr(self, "request_id", None),
+            )
+            if hooked_messages is not messages:
+                messages[:] = hooked_messages
 
             msg_dict, finish = self._call(system, messages)
-            self.hooks.run_post_llm(msg_dict, iteration=iteration, state=state, finish_reason=finish)
+            msg_dict = self.hooks.run_post_llm(
+                msg_dict, iteration=iteration, state=state, finish_reason=finish,
+                request_id=self.request_id,
+            )
             messages.append(msg_dict)
 
             tool_calls = msg_dict.get("tool_calls") or []
@@ -189,19 +213,23 @@ class Agent:
                 self.stats.tool_calls += 1
                 output = self.registry.dispatch(name, arguments, hooks=self.hooks)
                 messages.append({"role": "tool", "tool_call_id": tc.get("id"), "content": output})
-                print(f"\n[工具 {name} 完成,输出 {len(output)} 字符]")
+                if self.on_tool is not None:
+                    self.on_tool(name, output)
                 logger.info("tool %s -> %s chars", name, len(output))
 
         logger.warning("达到最大迭代次数 %s,强制返回", max_iter)
-        return final_text
+        return final_text or "任务达到最大迭代次数，未产生最终答案。"
 
     # ---------- 子代理编排 ----------
     def orchestrate(self, tasks: List[str], system: Optional[str] = None,
                     tools: Optional[List[str]] = None, workers: int = 4,
-                    max_tokens: int = 1200) -> List[str]:
-        """把多个独立子任务并行派发给子代理。tools 传工具名白名单。"""
+                    max_tokens: int = 1200, max_iterations: Optional[int] = None) -> List[str]:
+        """把多个独立子任务并行派发给子代理；tools 是强制工具白名单。"""
         schemas = self.registry.schemas_for(tools) if tools is not None else None
+        allowed_tools = list(tools) if tools is not None else None
         return run_subagents_parallel(
             tasks, system=system, tools=schemas, model=self.settings.MODEL,
             max_tokens=max_tokens, client=self.client, workers=workers,
+            registry=self.registry, hooks=self.hooks, allowed_tools=allowed_tools,
+            max_iterations=max_iterations or min(self.settings.MAX_ITERATIONS, 10),
         )

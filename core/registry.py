@@ -140,12 +140,23 @@ class ToolRegistry:
         if not isinstance(args, dict):
             return f"ERROR: 工具参数必须是 JSON object,收到 {type(args).__name__}"
 
-        # 只传签名内存在的参数
+        if tool.permission not in ("allow", "public"):
+            logger.warning("工具 %s 被权限策略拒绝: %s", name, tool.permission)
+            return f"BLOCKED: 工具 {name} 当前不允许执行"
+
+        # 严格过滤参数，未知参数直接返回错误，避免静默执行错误请求
         sig = inspect.signature(tool.fn)
         allowed = {k: v for k, v in args.items() if k in sig.parameters}
         extra = set(args) - set(allowed)
         if extra:
-            logger.warning("工具 %s 收到未知参数 %s,已丢弃", name, extra)
+            return f"ERROR: 工具收到未知参数: {', '.join(sorted(extra))}"
+        missing = [
+            p.name for p in sig.parameters.values()
+            if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY)
+            and p.default is inspect.Parameter.empty and p.name not in args
+        ]
+        if missing:
+            return f"ERROR: 缺少必需参数: {', '.join(missing)}"
         args = allowed
 
         # 执行(hook 抛的 ToolSecurityError 也在这里兜住)
@@ -161,7 +172,11 @@ class ToolRegistry:
             result = f"ERROR: 工具执行异常 {type(e).__name__}: {e}"
 
         if hooks is not None:
-            result = hooks.run_post_tool(name, args, result)
+            try:
+                result = hooks.run_post_tool(name, args, result)
+            except Exception as e:  # noqa: BLE001
+                logger.exception("工具 %s 的 post hook 执行异常", name)
+                result = f"ERROR: 工具后处理异常 {type(e).__name__}"
         return str(result)
 
 

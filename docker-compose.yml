@@ -1,0 +1,31 @@
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+  harness:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      MODEL: ${MODEL:-gpt-4o-mini}
+      API_AUTH_TOKEN: ${API_AUTH_TOKEN}
+      REDIS_URL: redis://redis:6379/0
+      REDIS_PREFIX: "harness:session:"
+      SESSION_TTL: ${SESSION_TTL:-86400}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-60}
+      MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-16}
+      ENABLE_BASH: "false"
+      ENVIRONMENT: production
+    depends_on:
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  redis_data:

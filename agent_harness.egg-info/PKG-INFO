@@ -1,0 +1,14 @@
+Metadata-Version: 2.4
+Name: agent-harness
+Version: 0.2.0
+Summary: 安全优先的 OpenAI-compatible Agent Harness
+Requires-Python: >=3.10
+Requires-Dist: openai<2,>=1.30
+Requires-Dist: tiktoken<1,>=0.7
+Requires-Dist: fastapi<1,>=0.110
+Requires-Dist: uvicorn[standard]<1,>=0.29
+Requires-Dist: redis<6,>=5.0
+Provides-Extra: dev
+Requires-Dist: pytest<9,>=8; extra == "dev"
+Requires-Dist: httpx<1,>=0.27; extra == "dev"
+Requires-Dist: ruff<1,>=0.6; extra == "dev"

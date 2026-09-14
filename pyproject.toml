@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-harness"
+version = "0.2.0"
+description = "安全优先的 OpenAI-compatible Agent Harness"
+requires-python = ">=3.10"
+dependencies = [
+  "openai>=1.30,<2",
+  "tiktoken>=0.7,<1",
+  "fastapi>=0.110,<1",
+  "uvicorn[standard]>=0.29,<1",
+  "redis>=5.0,<6",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8,<9",
+  "httpx>=0.27,<1",
+  "ruff>=0.6,<1",
+]
+
+[tool.setuptools]
+packages = ["harness", "harness.core", "harness.tools"]
+package-dir = {"harness" = ".", "harness.core" = "core", "harness.tools" = "tools"}
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

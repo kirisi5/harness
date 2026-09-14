@@ -2,6 +2,7 @@
 import json
 import logging
 import pathlib
+import tempfile
 from typing import List, Optional
 
 from .messages import to_dict, group_turns
@@ -36,7 +37,17 @@ class MemoryStore:
         turns = group_turns(body)
         keep = ([sys_msg] if sys_msg else []) + [m for g in turns[-keep_turns:] for m in g]
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(keep, ensure_ascii=False, indent=2), encoding="utf-8")
+        payload = json.dumps(keep, ensure_ascii=False, indent=2)
+        fd, temp_name = tempfile.mkstemp(prefix=".memory-", suffix=".tmp", dir=self.path.parent)
+        try:
+            with open(fd, "w", encoding="utf-8", newline="") as temp:
+                temp.write(payload)
+                temp.flush()
+            pathlib.Path(temp_name).replace(self.path)
+        finally:
+            temp_path = pathlib.Path(temp_name)
+            if temp_path.exists():
+                temp_path.unlink()
         logger.info("memory saved: %s messages (%s turns)", len(keep), min(len(turns), keep_turns))
 
     def clear(self) -> None:
